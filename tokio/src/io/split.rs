@@ -73,7 +73,7 @@ impl<T> ReadHalf<T> {
 
             let inner = Arc::try_unwrap(self.inner)
                 .ok()
-                .expect("Arc::try_unwrap failed");
+                .expect("`Arc::try_unwrap` failed");
 
             inner.stream.into_inner()
         } else {

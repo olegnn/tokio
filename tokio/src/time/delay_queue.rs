@@ -28,7 +28,7 @@ use std::task::{self, Poll};
 ///
 /// Once delays have been configured, the `DelayQueue` is used via its
 /// [`Stream`] implementation. [`poll`] is called. If an entry has reached its
-/// deadline, it is returned. If not, `Async::NotReady` indicating that the
+/// deadline, it is returned. If not, `Poll::Pending` indicating that the
 /// current task will be notified once the deadline has been reached.
 ///
 /// # `Stream` implementation

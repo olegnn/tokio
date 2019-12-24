@@ -277,7 +277,7 @@ where
     /// This always checks for writable readiness and also checks for HUP
     /// readiness on platforms that support it.
     ///
-    /// If the resource is not ready for a write then `Async::NotReady` is
+    /// If the resource is not ready for a write then `Poll::Pending` is
     /// returned and the current task is notified once a new event is received.
     ///
     /// The I/O resource will remain in a write-ready state until readiness is

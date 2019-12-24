@@ -117,7 +117,7 @@ impl<T: Stream> Spawn<T> {
 }
 
 impl MockTask {
-    /// Create a new mock task
+    /// Create new mock task
     fn new() -> Self {
         MockTask {
             waker: Arc::new(ThreadWaker::new()),
@@ -190,8 +190,7 @@ impl ThreadWaker {
     }
 
     fn wake(&self) {
-        // First, try transitioning from IDLE -> NOTIFY, this does not require a
-        // lock.
+        // First, try transitioning from IDLE -> NOTIFY, this does not require a lock.
         let mut state = self.state.lock().unwrap();
         let prev = *state;
 

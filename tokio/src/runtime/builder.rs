@@ -49,11 +49,11 @@ pub struct Builder {
 
     /// The number of worker threads, used by Runtime.
     ///
-    /// Only used when not using the current-thread executor.
-    core_threads: usize,
+    /// Only used when using not the current-thread executor.
+    core_threads: Option<usize>,
 
     /// Cap on thread usage.
-    max_threads: usize,
+    pub(super) max_threads: usize,
 
     /// Name used for threads spawned by the runtime.
     pub(super) thread_name: String,
@@ -94,8 +94,9 @@ impl Builder {
             enable_time: false,
 
             // Default to use an equal number of threads to number of CPU cores
-            core_threads: crate::loom::sys::num_cpus(),
+            core_threads: None,
 
+            // Default limit which restricts number of threads to be used by `Runtime`
             max_threads: 512,
 
             // Default thread name
@@ -138,18 +139,18 @@ impl Builder {
     #[deprecated(note = "In future will be replaced by core_threads method")]
     /// Set the maximum number of worker threads for the `Runtime`'s thread pool.
     ///
-    /// This must be a number between 1 and 32,768 though it is advised to keep
+    /// This must be a number from 1 to 32,767 though it is advised to keep
     /// this value on the smaller side.
     ///
     /// The default value is the number of cores available to the system.
-    pub fn num_threads(&mut self, val: usize) -> &mut Self {
-        self.core_threads = val;
+    pub fn num_threads(&mut self, value: usize) -> &mut Self {
+        self.core_threads = Some(value);
         self
     }
 
     /// Set the core number of worker threads for the `Runtime`'s thread pool.
     ///
-    /// This should be a number between 1 and 32,768 though it is advised to keep
+    /// This should be a number from 1 to 32,767 though it is advised to keep
     /// this value on the smaller side.
     ///
     /// The default value is the number of cores available to the system.
@@ -166,9 +167,9 @@ impl Builder {
     ///     .build()
     ///     .unwrap();
     /// ```
-    pub fn core_threads(&mut self, val: usize) -> &mut Self {
-        assert_ne!(val, 0, "Core threads cannot be zero");
-        self.core_threads = val;
+    pub fn core_threads(&mut self, value: usize) -> &mut Self {
+        assert_ne!(value, 0, "Core threads cannot be zero");
+        self.core_threads = Some(value);
         self
     }
 
@@ -178,7 +179,7 @@ impl Builder {
     /// Having `max_threads` less than `core_threads` results in invalid configuration
     /// when building multi-threaded `Runtime`, which would cause a panic.
     ///
-    /// Similarly to the `core_threads`, this number should be between 1 and 32,768.
+    /// Similarly to the `core_threads`, this number should be from 1 to 32,767.
     ///
     /// The default value is 512.
     ///
@@ -186,9 +187,9 @@ impl Builder {
     ///
     /// Otherwise as `core_threads` are always active, it limits additional threads (e.g. for
     /// blocking annotations) as `max_threads - core_threads`.
-    pub fn max_threads(&mut self, val: usize) -> &mut Self {
-        assert_ne!(val, 0, "Thread limit cannot be zero");
-        self.max_threads = val;
+    pub fn max_threads(&mut self, value: usize) -> &mut Self {
+        assert_ne!(value, 0, "Thread limit cannot be zero");
+        self.max_threads = value;
         self
     }
 
@@ -207,8 +208,8 @@ impl Builder {
     ///     .build();
     /// # }
     /// ```
-    pub fn thread_name(&mut self, val: impl Into<String>) -> &mut Self {
-        self.thread_name = val.into();
+    pub fn thread_name(&mut self, value: impl Into<String>) -> &mut Self {
+        self.thread_name = value.into();
         self
     }
 
@@ -231,8 +232,8 @@ impl Builder {
     ///     .build();
     /// # }
     /// ```
-    pub fn thread_stack_size(&mut self, val: usize) -> &mut Self {
-        self.thread_stack_size = Some(val);
+    pub fn thread_stack_size(&mut self, value: usize) -> &mut Self {
+        self.thread_stack_size = Some(value);
         self
     }
 
@@ -317,6 +318,8 @@ impl Builder {
     fn build_shell_runtime(&mut self) -> io::Result<Runtime> {
         use crate::runtime::Kind;
 
+        assert!(self.core_threads.is_none(), "`.core_threads()` method was called but runtime isn't configured with `threaded_scheduler`");
+
         let clock = time::create_clock();
 
         // Create I/O driver
@@ -325,14 +328,8 @@ impl Builder {
 
         let spawner = Spawner::Shell;
 
-        let blocking_pool = blocking::create_blocking_pool(
-            self,
-            &spawner,
-            &io_handle,
-            &time_handle,
-            &clock,
-            self.max_threads,
-        );
+        let blocking_pool =
+            blocking::create_blocking_pool(self, &spawner, &io_handle, &time_handle, &clock);
         let blocking_spawner = blocking_pool.spawner().clone();
 
         Ok(Runtime {
@@ -410,6 +407,8 @@ cfg_rt_core! {
         fn build_basic_runtime(&mut self) -> io::Result<Runtime> {
             use crate::runtime::{BasicScheduler, Kind};
 
+            assert!(self.core_threads.is_none(), "`.core_threads()` method was called but runtime isn't configured with `threaded_scheduler`");
+
             let clock = time::create_clock();
 
             // Create I/O driver
@@ -425,7 +424,7 @@ cfg_rt_core! {
             let spawner = Spawner::Basic(scheduler.spawner());
 
             // Blocking pool
-            let blocking_pool = blocking::create_blocking_pool(self, &spawner, &io_handle, &time_handle, &clock, self.max_threads);
+            let blocking_pool = blocking::create_blocking_pool(self, &spawner, &io_handle, &time_handle, &clock);
             let blocking_spawner = blocking_pool.spawner().clone();
 
             Ok(Runtime {
@@ -455,17 +454,19 @@ cfg_rt_threaded! {
             use crate::runtime::{Kind, ThreadPool};
             use crate::runtime::park::Parker;
 
-            assert!(self.core_threads <= self.max_threads, "Core threads number cannot be above max limit");
+            let core_threads = self.core_threads.unwrap_or_else(crate::loom::sys::num_cpus);
+
+            assert!(core_threads <= self.max_threads, "Core threads number cannot be above max limit");
 
             let clock = time::create_clock();
 
             let (io_driver, io_handle) = io::create_driver(self.enable_io)?;
             let (driver, time_handle) = time::create_driver(self.enable_time, io_driver, clock.clone());
-            let (scheduler, workers) = ThreadPool::new(self.core_threads, Parker::new(driver));
+            let (scheduler, workers) = ThreadPool::new(core_threads, Parker::new(driver));
             let spawner = Spawner::ThreadPool(scheduler.spawner().clone());
 
             // Create the blocking pool
-            let blocking_pool = blocking::create_blocking_pool(self, &spawner, &io_handle, &time_handle, &clock, self.max_threads);
+            let blocking_pool = blocking::create_blocking_pool(self, &spawner, &io_handle, &time_handle, &clock);
             let blocking_spawner = blocking_pool.spawner().clone();
 
             // Spawn the thread pool workers

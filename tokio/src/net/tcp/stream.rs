@@ -91,7 +91,7 @@ impl TcpStream {
         Err(last_err.unwrap_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "could not resolve to any addresses",
+                "could not resolve to any address",
             )
         }))
     }
@@ -205,7 +205,7 @@ impl TcpStream {
         self.io.get_ref().peer_addr()
     }
 
-    /// Attempt to receive data on the socket, without removing that data from
+    /// Attempts to receive data on the socket, without removing that data from
     /// the queue, registering the current task for wakeup if data is not yet
     /// available.
     ///
@@ -605,7 +605,7 @@ impl TcpStream {
         self.io.get_ref().set_linger(dur)
     }
 
-    /// Split a `TcpStream` into a read half and a write half, which can be used
+    /// Splits a `TcpStream` into a read half and a write half, which can be used
     /// to read and write the stream concurrently.
     ///
     /// See the module level documenation of [`split`](super::split) for more
